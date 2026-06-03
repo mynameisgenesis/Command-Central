@@ -62,7 +62,15 @@ The database schema is in:
 supabase/migrations/20260603000000_create_lights.sql
 ```
 
-That migration creates `public.lights`, enables row level security, grants `anon` and `authenticated` access for this no-login shared board, seeds the starter lights, and registers the table for Supabase Realtime.
+That migration creates `public.lights`, enables row level security, seeds the starter lights, and registers the table for Supabase Realtime.
+
+Authentication is handled with Supabase email/password auth. The follow-up migration:
+
+```bash
+supabase/migrations/20260603001000_require_auth_for_lights.sql
+```
+
+removes anonymous table access and allows only signed-in users to read or change lights. In the Supabase Dashboard, keep Email enabled under Authentication Providers. If email confirmations are enabled, new users need to confirm their email before signing in.
 
 From this workspace, the Codex app also has these actions wired:
 
@@ -85,12 +93,12 @@ Adding a light puts a new labeled signal at the front of the board. Changing a c
 ## Current behavior
 
 - The dashboard starts with a few example lights when Supabase is not configured.
-- When Supabase is configured, the dashboard loads lights from `public.lights`.
+- When Supabase is configured, users sign in before the dashboard loads lights from `public.lights`.
 - New lights default to yellow.
 - Empty names are rejected.
 - Duplicate names are rejected case-insensitively, so `Dinner` and `dinner` are treated as the same light.
 - The grid uses 4 columns on wide screens, 3 on tablet-sized screens, and 2 on smaller screens.
-- State is shared through Supabase and refreshes through Realtime when another screen changes a light.
+- State is shared through Supabase and refreshes through Realtime when another signed-in screen changes a light.
 
 ## Project notes
 
