@@ -5,10 +5,10 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   useWindowDimensions,
   View,
 } from "react-native";
+import { TextInput } from "react-native-paper";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -124,7 +124,6 @@ export default function StatusBoardScreen() {
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authMode, setAuthMode] = useState<"sign-in" | "sign-up">("sign-in");
-  const [isPasswordSecure, setIsPasswordSecure] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(isSupabaseConfigured);
@@ -133,6 +132,7 @@ export default function StatusBoardScreen() {
     useState(isSupabaseConfigured);
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
   const { width } = useWindowDimensions();
+  const [visible, setVisible] = useState(false);
 
   const columns = getGridColumns(width);
   const isCompact = width < 640;
@@ -415,6 +415,7 @@ export default function StatusBoardScreen() {
               placeholderTextColor="#8a94a6"
               style={styles.input}
               value={authEmail}
+              left={<TextInput.Icon icon="email" />}
             />
             <TextInput
               accessibilityLabel="Password"
@@ -431,20 +432,17 @@ export default function StatusBoardScreen() {
               onSubmitEditing={submitAuth}
               placeholder="Password"
               placeholderTextColor="#8a94a6"
-              secureTextEntry
+              secureTextEntry={!visible}
               style={styles.input}
               value={authPassword}
+              left={<TextInput.Icon icon="lock" />}
+              right={
+                <TextInput.Icon
+                  icon={!visible ? "eye-off" : "eye"}
+                  onPress={() => setVisible(!visible)}
+                />
+              }
             />
-            <Pressable
-              style={styles.iconContainer}
-              onPress={() => setIsPasswordSecure(!isPasswordSecure)}
-            >
-              <MaterialCommunityIcons
-                name={isPasswordSecure ? "eye-off" : "eye"}
-                size={22}
-                color="#666"
-              />
-            </Pressable>
 
             {error ? <Text style={styles.error}>{error}</Text> : null}
 
