@@ -28,6 +28,42 @@ Run directly on the iOS simulator:
 npm run ios
 ```
 
+## Supabase setup
+
+The app reads and writes lights through Supabase when these Expo public variables are set:
+
+```bash
+EXPO_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
+EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_your_key_here
+```
+
+Use separate Supabase projects or a production project plus a development branch:
+
+- Development values belong in `.env.local` while you are building locally.
+- Production values should be supplied by your production build/deploy environment.
+- `.env.development.example` and `.env.production.example` show the shape for each database.
+
+For local development, copy the development example and fill it with the dev project URL and publishable key:
+
+```bash
+cp .env.development.example .env.local
+```
+
+For a production web export or app build, make sure `.env.local` or your build environment contains the production URL and publishable key before running:
+
+```bash
+npm run web
+./script/build_and_run.sh --export-web
+```
+
+The database schema is in:
+
+```bash
+supabase/migrations/20260603000000_create_lights.sql
+```
+
+That migration creates `public.lights`, enables row level security, grants `anon` and `authenticated` access for this no-login shared board, seeds the starter lights, and registers the table for Supabase Realtime.
+
 From this workspace, the Codex app also has these actions wired:
 
 ```bash
@@ -48,12 +84,13 @@ Adding a light puts a new labeled signal at the front of the board. Changing a c
 
 ## Current behavior
 
-- The dashboard starts with a few example lights.
+- The dashboard starts with a few example lights when Supabase is not configured.
+- When Supabase is configured, the dashboard loads lights from `public.lights`.
 - New lights default to yellow.
 - Empty names are rejected.
 - Duplicate names are rejected case-insensitively, so `Dinner` and `dinner` are treated as the same light.
 - The grid uses 4 columns on wide screens, 3 on tablet-sized screens, and 2 on smaller screens.
-- State is currently local to the browser or app session. A real shared household webpage would need a backend or real-time database so everyone sees the same light changes.
+- State is shared through Supabase and refreshes through Realtime when another screen changes a light.
 
 ## Project notes
 

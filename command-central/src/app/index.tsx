@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Keyboard,
   Pressable,
@@ -11,13 +11,17 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-type LightStatus = 'red' | 'yellow' | 'green';
-
-type StatusLight = {
-  id: number;
-  name: string;
-  status: LightStatus;
-};
+import {
+  createLight as createRemoteLight,
+  deleteLight as deleteRemoteLight,
+  fetchLights,
+  subscribeToLightChanges,
+  toUserFacingError,
+  updateLightStatus as updateRemoteLightStatus,
+  type LightRow,
+  type LightStatus,
+} from '@/lib/lights';
+import { isSupabaseConfigured } from '@/lib/supabase';
 
 const statusOptions: {
   value: LightStatus;
@@ -30,13 +34,22 @@ const statusOptions: {
   { value: 'green', label: 'Green', meaning: 'Go', color: '#16a34a' },
 ];
 
-const starterLights: StatusLight[] = [
-  { id: 1, name: 'Dinner', status: 'yellow' },
-  { id: 2, name: 'Nap', status: 'red' },
-  { id: 3, name: 'Homework', status: 'green' },
-  { id: 4, name: 'Laundry', status: 'yellow' },
-  { id: 5, name: 'Garage', status: 'green' },
-  { id: 6, name: 'Quiet Time', status: 'red' },
+const now = new Date().toISOString();
+
+const starterLights: LightRow[] = [
+  { id: 'demo-dinner', name: 'Dinner', status: 'yellow', sort_order: 1, created_at: now, updated_at: now },
+  { id: 'demo-nap', name: 'Nap', status: 'red', sort_order: 2, created_at: now, updated_at: now },
+  { id: 'demo-homework', name: 'Homework', status: 'green', sort_order: 3, created_at: now, updated_at: now },
+  { id: 'demo-laundry', name: 'Laundry', status: 'yellow', sort_order: 4, created_at: now, updated_at: now },
+  { id: 'demo-garage', name: 'Garage', status: 'green', sort_order: 5, created_at: now, updated_at: now },
+  {
+    id: 'demo-quiet-time',
+    name: 'Quiet Time',
+    status: 'red',
+    sort_order: 6,
+    created_at: now,
+    updated_at: now,
+  },
 ];
 
 function getGridColumns(width: number) {
@@ -51,21 +64,51 @@ function getGridColumns(width: number) {
   return 2;
 }
 
-function getNextId(lights: StatusLight[]) {
-  return lights.reduce((largest, light) => Math.max(largest, light.id), 0) + 1;
+function getNextSortOrder(lights: LightRow[]) {
+  return lights.reduce((largest, light) => Math.max(largest, light.sort_order), 0) + 1;
 }
 
 export default function StatusBoardScreen() {
-  const [lights, setLights] = useState(starterLights);
+  const [lights, setLights] = useState<LightRow[]>(isSupabaseConfigured ? [] : starterLights);
   const [newLightName, setNewLightName] = useState('');
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(isSupabaseConfigured);
+  const [isSaving, setIsSaving] = useState(false);
   const { width } = useWindowDimensions();
 
   const columns = getGridColumns(width);
   const isCompact = width < 640;
   const tileWidth = useMemo(() => `${100 / columns}%` as const, [columns]);
 
-  const createLight = () => {
+  const loadLights = useCallback(async () => {
+    if (!isSupabaseConfigured) {
+      return;
+    }
+
+    try {
+      const savedLights = await fetchLights();
+      setLights(savedLights);
+      setError('');
+    } catch (loadError) {
+      setError(toUserFacingError(loadError));
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void loadLights();
+    }, 0);
+    const unsubscribe = subscribeToLightChanges(loadLights);
+
+    return () => {
+      clearTimeout(timer);
+      unsubscribe();
+    };
+  }, [loadLights]);
+
+  const createLight = async () => {
     const trimmedName = newLightName.trim();
 
     if (!trimmedName) {
@@ -82,24 +125,80 @@ export default function StatusBoardScreen() {
       return;
     }
 
-    setLights((currentLights) => [
-      { id: getNextId(currentLights), name: trimmedName, status: 'yellow' },
-      ...currentLights,
-    ]);
-    setNewLightName('');
-    setError('');
-    Keyboard.dismiss();
+    try {
+      setIsSaving(true);
+
+      if (isSupabaseConfigured) {
+        const savedLight = await createRemoteLight(trimmedName);
+        setLights((currentLights) => [savedLight, ...currentLights]);
+      } else {
+        const createdAt = new Date().toISOString();
+        setLights((currentLights) => [
+          {
+            id: `demo-${Date.now()}`,
+            name: trimmedName,
+            status: 'yellow',
+            sort_order: getNextSortOrder(currentLights),
+            created_at: createdAt,
+            updated_at: createdAt,
+          },
+          ...currentLights,
+        ]);
+      }
+
+      setNewLightName('');
+      setError('');
+      Keyboard.dismiss();
+    } catch (createError) {
+      setError(toUserFacingError(createError));
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const updateLightStatus = (id: number, status: LightStatus) => {
+  const updateLightStatus = async (id: string, status: LightStatus) => {
+    const previousLights = lights;
     setLights((currentLights) =>
-      currentLights.map((light) => (light.id === id ? { ...light, status } : light)),
+      currentLights.map((light) =>
+        light.id === id ? { ...light, status, updated_at: new Date().toISOString() } : light,
+      ),
     );
+
+    if (!isSupabaseConfigured) {
+      return;
+    }
+
+    try {
+      await updateRemoteLightStatus(id, status);
+      setError('');
+    } catch (updateError) {
+      setLights(previousLights);
+      setError(toUserFacingError(updateError));
+    }
   };
 
-  const removeLight = (id: number) => {
+  const removeLight = async (id: string) => {
+    const previousLights = lights;
     setLights((currentLights) => currentLights.filter((light) => light.id !== id));
+
+    if (!isSupabaseConfigured) {
+      return;
+    }
+
+    try {
+      await deleteRemoteLight(id);
+      setError('');
+    } catch (deleteError) {
+      setLights(previousLights);
+      setError(toUserFacingError(deleteError));
+    }
   };
+
+  const syncText = isSupabaseConfigured
+    ? isLoading
+      ? 'Loading Supabase lights...'
+      : 'Synced with Supabase'
+    : 'Demo mode until Supabase env vars are set';
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -108,6 +207,7 @@ export default function StatusBoardScreen() {
           <View>
             <Text style={styles.title}>Command Central</Text>
             <Text style={styles.subtitle}>Shared red, yellow, and green signals for home.</Text>
+            <Text style={styles.syncStatus}>{syncText}</Text>
           </View>
           <View style={styles.summary}>
             {statusOptions.map((option) => {
@@ -144,20 +244,26 @@ export default function StatusBoardScreen() {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Create light"
+            disabled={isSaving}
             onPress={createLight}
             style={({ pressed }) => [
               styles.createButton,
               isCompact && styles.createButtonCompact,
+              isSaving && styles.disabled,
               pressed && styles.pressed,
             ]}>
             <Text style={styles.createButtonIcon}>+</Text>
-            <Text style={styles.createButtonText}>Create</Text>
+            <Text style={styles.createButtonText}>{isSaving ? 'Saving' : 'Create'}</Text>
           </Pressable>
         </View>
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         <View style={styles.grid}>
-          {lights.map((light) => {
+          {isLoading ? <Text style={styles.loadingText}>Loading lights...</Text> : null}
+          {!isLoading && lights.length === 0 ? (
+            <Text style={styles.loadingText}>No lights yet. Add the first one above.</Text>
+          ) : null}
+          {!isLoading && lights.map((light) => {
             const activeOption = statusOptions.find((option) => option.value === light.status);
 
             return (
@@ -263,6 +369,13 @@ const styles = StyleSheet.create({
     lineHeight: 23,
     marginTop: 4,
   },
+  syncStatus: {
+    color: '#667085',
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 19,
+    marginTop: 8,
+  },
   summary: {
     alignItems: 'center',
     backgroundColor: '#ffffff',
@@ -326,6 +439,9 @@ const styles = StyleSheet.create({
   createButtonCompact: {
     width: '100%',
   },
+  disabled: {
+    opacity: 0.55,
+  },
   createButtonIcon: {
     color: '#ffffff',
     fontSize: 22,
@@ -342,6 +458,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     marginBottom: 10,
+  },
+  loadingText: {
+    color: '#536176',
+    fontSize: 15,
+    fontWeight: '700',
+    paddingHorizontal: 7,
+    paddingVertical: 18,
   },
   grid: {
     flexDirection: 'row',
